@@ -1,151 +1,153 @@
 # ESFX TaskFlow
 
-Sistema de gestión de tareas (tipo ERP interno) de ESFX Technologies. Es un proyecto **independiente del bot de trading**: tiene su propio repositorio, base de datos y despliegue.
+Sistema interno de gestión de proyectos, tableros Kanban, calendario, notificaciones y control de horas (ERP operativo) desarrollado para **ESFX Technologies / EsForexVPS.com**.
 
-> Estado: **planificación (semana 7, diseño técnico)**. Todavía no hay código; esta carpeta contiene el diseño que se construirá en las semanas 8 a 10.
+## Estado actual
+MVP funcional implementado con tema oscuro/claro inspirado en `esforexvps.com`.  
+El backend está construido sobre Java 21 + Spring Boot 3.3, el frontend sobre React 18 + TypeScript + Vite y Bootstrap 5, la base de datos PostgreSQL 16 y Redis 7 corren en contenedores Docker.
 
-## Tecnologías
+## Stack Tecnológico
 
-| Capa | Tecnología |
-|---|---|
-| Backend | Java con Spring Boot, arquitectura MVC (los controladores REST hacen de vista), monolito modular |
-| Frontend | React + TypeScript + Bootstrap (Vite), estilo inspirado en esforexvps.com |
-| Base de datos | PostgreSQL 16 en Docker, puerto **5433** (no el 5432) |
-| Colas | Redis 7 en Docker, puerto **6380** |
-| Seguridad | JWT; contraseñas con BCrypt, nunca se devuelven ni se escriben en logs |
-| Correo | Gmail detrás de una interfaz `EmailProvider`; Calendar y Contactos en la fase 3 |
-| Documentación | OpenAPI (`docs/api/openapi.yaml`) |
+| Capa | Tecnología | Detalles |
+|------|------------|----------|
+| **Backend** | Java 21 + Spring Boot 3.3 | Monolito modular MVC con `JdbcClient` (consultas SQL explícitas), puerto `8085`. Cada módulo usa un esquema PostgreSQL propio y no comparte claves foráneas entre ellos. |
+| **Frontend** | React 18 + TypeScript + Vite + Bootstrap 5 | Tema oscuro/claro con paleta basada en `esforexvps.com` (`#0F0F0F`, `#ADFF2F`, `#3D5AFE`). Puerto `5173`. |
+| **Base de datos** | PostgreSQL 16 (Docker) | Múltiples migraciones versionadas por Flyway; `FLYWAY_DEV_LOCATION=classpath:db/dev` habilita la carga automática de datos de prueba. |
+| **Colas / Caché** | Redis 7 (Docker) | Puertos `6380 → 6379`; cola de notificaciones y recordatorios. |
+| **Seguridad** | Spring Security + JWT (JJWT) | Contraseñas cifradas con BCrypt, cambio obligatorio en primer inicio. |
+| **Documentación** | OpenAPI 3 / Swagger UI | Especificación en `docs/api/openapi.yaml`, UI accesible desde `/swagger-ui.html`. |
 
-## Estructura de carpetas
+## Estructura del Repositorio
 
-```
-esfx-taskflow/
-├── backend/                 proyecto Java 21 + Spring Boot (Maven)
-├── frontend/                proyecto React + TypeScript (Vite)
+```text
+plan_practicas/
+├── backend/                 # API REST Java 21 + Spring Boot (Maven)
+│   ├── src/main/java/      # Código fuente de los módulos (no modificar aquí)
+│   └── src/main/resources/
+│       ├── db/migration/   # Migraciones Flyway
+│       └── db/dev/         # Seed SQL de desarrollo (usuarios, proyectos, tareas...)
+├── frontend/                # SPA React + TypeScript + Vite + Bootstrap 5
+│   └── src/styles/theme.css   # Sistema de diseño EsForexVPS (Dark/Light)
 ├── docker/
-│   ├── docker-compose.yml   PostgreSQL (5433), Redis (6380) y, con el perfil "app", backend + frontend
-│   └── .env.example         copiar como .env
+│   ├── docker-compose.yml   # PostgreSQL y Redis (5433 / 6380) + perfil “app” para backend+frontend
+│   ├── .env.example         # Plantilla de variables de entorno
+│   └── seed-dev.sh          # Script manual para cargar datos de prueba
 ├── docs/
-│   ├── api/openapi.yaml     contrato de la API (Fase 1)
-│   ├── database/V1__init.sql  migración inicial (Flyway)
-│   └── diagramas/
-│       ├── er-base-de-datos.png / .mmd
-│       └── arquitectura-modulos.png / .mmd
-├── .gitignore
+│   ├── api/openapi.yaml     # Especificación OpenAPI Fase 1
+│   ├── database/V1__init.sql
+│   └── diagramas/           # Diagramas ER y arquitectura modular (.png / .mmd)
+├── PRODUCT.md               # Contexto de producto y objetivos
+├── DESIGN.md                # Tokens y reglas visuales del sistema
 └── README.md
 ```
 
-Los dos proyectos (`backend` y `frontend`) viven en la misma carpeta, cada uno con su propio `package.json` o `pom.xml`.
+## Arquitectura Modular (Preparada para Microservicios)
 
-## Cómo levantar la base de datos
+El paquete base `com.esfx.taskflow` se divide en:
+
+| Módulo | Responsabilidad | Esquema PostgreSQL |
+|--------|-----------------|---------------------|
+| **common** | Seguridad JWT, manejo global de excepciones, auditoría y contratos entre módulos (`UserDirectory`, `ProjectsApi`, `CalendarApi`, etc.) | `public` |
+| **access** | Gestión de usuarios, roles y permisos, log de auditoría | `access` |
+| **projects** | Proyectos, miembros y tablero Kanban (TODO/IN_PROGRESS/DONE), comentarios y adjuntos | `projects` |
+| **calendar** | Reuniones, invitaciones, vista unificada con fechas límite | `calendar` |
+| **notifications** | Plantillas IN_APP / EMAIL, idempotencia, cola Redis | `notifications` |
+| **timetracking** | Registro de horas por tarea y proyecto | `timetracking` |
+| **reports** | Dashboard ejecutivo de solo lectura que agrega métricas entre módulos | `public` |
+
+**Principios de desacoplamiento**
+
+1. Cada módulo posee su propio esquema sin claves foráneas externas.
+2. La comunicación entre módulos se realiza únicamente a través de interfaces definidas en `common` o mediante eventos de dominio.
+
+## Roles y Permisos
+
+| Permiso | Administrador | Gerente | Jefe de proyecto | Colaborador |
+|---------|:------------:|:-------:|:----------------:|:-----------:|
+| Gestionar usuarios y roles (`USER_MANAGE`) | ✔ | | | |
+| Ver auditoría (`AUDIT_VIEW`) | ✔ | ✔ | | |
+| Crear y editar proyectos (`PROJECT_CREATE`, `PROJECT_EDIT`) | ✔ | ✔ | ✔ | |
+| Crear y asignar tareas (`TASK_CREATE`, `TASK_ASSIGN`) | ✔ | | ✔ | |
+| Editar cualquier tarea (`TASK_UPDATE_ANY`) | ✔ | | ✔ | |
+| Editar tareas propias (`TASK_UPDATE_OWN`) | ✔ | | ✔ | ✔ |
+| Comentar y adjuntar archivos (`COMMENT_CREATE`) | ✔ | ✔ | ✔ | ✔ |
+| Programar reuniones (`MEETING_CREATE`) | ✔ | ✔ | ✔ | |
+| Responder invitaciones (`MEETING_RESPOND`) | ✔ | ✔ | ✔ | ✔ |
+| Registrar horas (`TIME_LOG`) | ✔ | ✔ | ✔ | ✔ |
+| Dashboard global (`REPORT_VIEW_ALL`) | ✔ | ✔ | | |
+| Dashboard de proyectos propios (`REPORT_VIEW_OWN`) | ✔ | | ✔ | ✔ |
+
+## Credenciales de Prueba (Entorno de Desarrollo)
+
+Para habilitar la carga automática de datos de prueba, activa `FLYWAY_DEV_LOCATION=classpath:db/dev` en `docker/.env` **o ejecuta** `./seed-dev.sh`. Se crean 5 usuarios, 2 proyectos y demás datos de ejemplo.
+
+| Correo | Rol | Contraseña |
+|--------|-----|------------|
+| `admin@esfx.local` | Administrador | `Esfx2026!` |
+| `gerente@esfx.local` | Gerente | `Esfx2026!` |
+| `jefe@esfx.local` | Jefe de proyecto | `Esfx2026!` |
+| `ana@esfx.local` | Colaborador | `Esfx2026!` |
+| `luis@esfx.local` | Colaborador | `Esfx2026!` |
+
+> **Advertencia:** el archivo `.env` contiene contraseñas y no debe ser comprometido; está en `.gitignore`.
+
+## Puesta en Marcha (Desarrollo Local)
+
+### Requisitos previos
+
+* Docker Desktop (o Docker Engine + Compose) – Windows, macOS o Linux.
+* JDK 21 y Maven 3.9+ – para compilar el backend.
+* Node.js 20+ – para instalar dependencias del frontend.
+
+> En Windows puedes usar PowerShell o Git Bash; los comandos son los mismos que se muestran a continuación.
+
+### 1. Levantar PostgreSQL, Redis y (opcional) backend
 
 ```bash
 cd docker
-cp .env.example .env        # cambia las contraseñas
+cp .env.example .env            # crea tu archivo de configuración local
+# Para cargar datos de prueba automáticamente al iniciar el backend,
+# descomenta la siguiente línea en .env:
+FLYWAY_DEV_LOCATION=classpath:db/dev
 docker compose up -d
 docker compose ps
 ```
 
-Flyway aplica solas las migraciones de `backend/src/main/resources/db/migration/` (V1 = esquema, V2 = plantilla de recuperación de contraseña) al arrancar el backend. El usuario administrador lo crea la aplicación con `APP_ADMIN_EMAIL` y `APP_ADMIN_PASSWORD`; no se guarda ninguna contraseña en el repositorio.
+> Si prefieres cargar los datos manualmente, ejecuta `./seed-dev.sh` dentro del directorio `docker`.
 
-## Reglas de arquitectura del backend
+### 2. Iniciar el Backend (Spring Boot)
 
-Paquete base propuesto: `com.esfx.taskflow`. Un paquete por módulo:
-
-```
-com.esfx.taskflow
-├── common/            seguridad JWT, manejo de errores, auditoría, utilidades
-├── access/            usuarios, roles, permisos, auditoría
-├── projects/          proyectos, tareas, Kanban, comentarios, adjuntos
-├── calendar/          reuniones e invitados
-├── notifications/     plantillas, cola, envío (EmailProvider)
-├── reports/           dashboard (solo consulta)
-└── timetracking/      horas trabajadas
+```bash
+cd backend
+mvn spring-boot:run
 ```
 
-Dentro de cada módulo: `controller` (la vista: recibe y devuelve JSON), `service` (reglas de negocio), `repository`, `model` (entidades) y `dto`.
+* API base: `http://localhost:8085/api`
+* Swagger UI: `http://localhost:8085/swagger-ui.html`
 
-Reglas para poder pasar a microservicios si el sistema crece:
+### 3. Iniciar el Frontend (React + Vite)
 
-1. Un módulo **nunca** usa el repositorio ni las entidades de otro; solo llama a su `service` mediante una interfaz.
-2. Un esquema de PostgreSQL por módulo y **sin claves foráneas entre esquemas**; las referencias (`user_id`, `task_id`) las valida el servicio.
-3. Las reacciones entre módulos se hacen con eventos (por ejemplo, "tarea asignada" → Notificaciones). Hoy son eventos internos de Spring; mañana pueden pasar por Redis.
-4. `reports` no tiene tablas: consulta a los demás módulos a través de sus servicios.
-5. Las integraciones externas (Gmail, Google Calendar) van detrás de una interfaz con un adaptador por proveedor.
-6. Primer módulo candidato a separarse: `notifications`.
+```bash
+cd frontend
+npm install          # instala dependencias Node
+npm run dev          # inicia el servidor de desarrollo en http://localhost:5173
+```
 
-## Notificaciones (flujo)
+> El script Vite redirige automáticamente las peticiones `/api` al backend.
 
-1. Un módulo publica un evento (tarea asignada, tarea por vencer, invitación a reunión).
-2. `notifications` crea el registro `PENDING` con su plantilla (canal `IN_APP` y/o `EMAIL`) y una `idempotency_key` para no duplicar avisos.
-3. Una cola en Redis entrega el registro al envío; el correo sale por Gmail.
-4. El registro pasa a `SENT` o `FAILED`; los fallos se reintentan y se cuentan en `attempts`.
+## Despliegue en Servidor (Ubuntu Server + Docker)
 
-## Roles y permisos (propuesta, a confirmar con el supervisor)
+1. Copia `docker/.env.example` a `docker/.env`, configura contraseñas seguras (`DB_PASSWORD`, `REDIS_PASSWORD`, `JWT_SECRET` ≥ 32 caracteres, `APP_ADMIN_PASSWORD`) y deja **`FLYWAY_DEV_LOCATION=` vacío** (para no cargar datos de prueba en producción).
 
-| Permiso | Administrador | Gerente | Jefe de proyecto | Colaborador |
-|---|:-:|:-:|:-:|:-:|
-| Gestionar usuarios y roles (USER_MANAGE) | ✔ | | | |
-| Ver auditoría (AUDIT_VIEW) | ✔ | ✔ | | |
-| Crear proyectos (PROJECT_CREATE) | ✔ | ✔ | ✔ | |
-| Editar proyectos y miembros (PROJECT_EDIT) | ✔ | ✔ | ✔ | |
-| Crear tareas (TASK_CREATE) | ✔ | | ✔ | |
-| Asignar tareas (TASK_ASSIGN) | ✔ | | ✔ | |
-| Editar cualquier tarea (TASK_UPDATE_ANY) | ✔ | | ✔ | |
-| Editar tareas propias (TASK_UPDATE_OWN) | ✔ | | ✔ | ✔ |
-| Comentar y adjuntar (COMMENT_CREATE) | ✔ | ✔ | ✔ | ✔ |
-| Programar reuniones (MEETING_CREATE) | ✔ | ✔ | ✔ | |
-| Responder invitaciones (MEETING_RESPOND) | ✔ | ✔ | ✔ | ✔ |
-| Registrar horas (TIME_LOG) | ✔ | ✔ | ✔ | ✔ |
-| Dashboard de todos los proyectos (REPORT_VIEW_ALL) | ✔ | ✔ | | |
-| Dashboard de proyectos propios (REPORT_VIEW_OWN) | ✔ | | ✔ | ✔ |
+2. Construye y levanta el stack completo con el perfil `app`:
 
-## Orden de construcción
+```bash
+cd docker
+docker compose --profile app up -d --build
+```
 
-| Semana | Trabajo |
-|---|---|
-| 7 | Diseño técnico: este material, wireframes y guía de estilo |
-| 8 | Backend: `access` → `projects` → `calendar` → `notifications` → `reports` → `timetracking` |
-| 9 | Frontend: mismas pantallas, en el mismo orden |
-| 10 | Integración y pruebas del MVP |
-| 11–12 | Flujo Git y CI/CD (Jenkins + Docker) |
+3. Accede desde tu red local o VPN (Tailscale) a `http://<IP_SERVIDOR>:5173`.
 
-Fase 2: pizarra de ideas, Planning Poker y costos. Fase 3: sincronización con Google Calendar y Contactos.
+---
 
-## Estilo visual (aproximado, tomado de esforexvps.com)
-
-Negro (~#0F0F0F) para menú y cabecera, verde neón (~#ADFF2F) para acciones destacadas, azul (~#3D5AFE) para acciones primarias, fondo claro azulado (~#F5F7FF) y tipografía tipo Inter. Se aplica sobrescribiendo las variables de Bootstrap.
-
-
-## Cómo ejecutarlo (desarrollo)
-
-Necesitas: JDK 21, Node 20+, Docker. Editores: IntelliJ IDEA Community (backend) y VS Code (frontend).
-
-1. **Base de datos y Redis**: `cd docker && cp .env.example .env` (cambia las claves) y `docker compose up -d`.
-2. **Backend** (IntelliJ: *File > Open* sobre `backend/`; IntelliJ detecta Maven y descarga las dependencias):
-   - Crea una configuración de ejecución para `TaskflowApplication` y define las variables de entorno (ver `backend/README.md`), o ejecuta en terminal con las variables ya exportadas: `mvn spring-boot:run`.
-   - Swagger: http://localhost:8085/swagger-ui.html
-3. **Frontend** (VS Code: abrir la carpeta `frontend/`): `npm install` y `npm start` → http://localhost:5173. Vite redirige `/api` al backend.
-4. Entra con `APP_ADMIN_EMAIL` / `APP_ADMIN_PASSWORD`; la primera vez pedirá cambiar la contraseña.
-
-Todo en contenedores: `cd docker && docker compose --profile app up -d --build` (frontend en http://localhost:5173).
-
-## Decisiones de implementación
-
-- El backend usa **Spring JDBC (`JdbcClient`) con SQL explícito** en lugar de JPA: más fácil de leer, de depurar contra el esquema y de separar por módulos.
-- El módulo `reports` es de solo lectura y es el único que consulta tablas de otro esquema (`projects`), porque un reporte agrega datos.
-- Los módulos se hablan por interfaces de `common` (`UserDirectory`, `ProjectsApi`, `CalendarApi`, `AuditPort`) y por eventos (`DomainEvents`).
-
-## Datos de prueba (solo desarrollo)
-
-`docker/.env` ya trae valores de prueba y `FLYWAY_DEV_LOCATION=,classpath:db/dev`, así que al arrancar el backend se cargan solos 5 usuarios, 2 proyectos, 10 tareas, comentarios, reuniones y horas. También se pueden cargar a mano con `docker/seed-dev.sh`.
-
-| Correo | Rol | Clave |
-|---|---|---|
-| admin@esfx.local | Administrador | Esfx2026! |
-| gerente@esfx.local | Gerente | Esfx2026! |
-| jefe@esfx.local | Jefe de proyecto | Esfx2026! |
-| ana@esfx.local | Colaborador | Esfx2026! |
-| luis@esfx.local | Colaborador | Esfx2026! |
-
-Las contraseñas están guardadas como hash BCrypt. En el servidor Ubuntu: cambiar todas las claves de `.env` y dejar `FLYWAY_DEV_LOCATION` vacío.
+> **Tip:** La carpeta `.gitignore` ya descarta `node_modules/`, `dist/`, `target/` y `docker/.env`. No añadas estas carpetas al control de versiones.
