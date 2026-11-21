@@ -1,0 +1,15 @@
+# Secretos y archivos locales
+.env
+*.log
+
+# Backend (Java / Maven)
+backend/target/
+
+# Frontend (Node)
+frontend/node_modules/
+frontend/dist/
+
+# IDEs
+.idea/
+.vscode/
+*.iml
