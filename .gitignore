@@ -1,9 +1,16 @@
 # Secretos y archivos locales
-.env
+.docker/ .env
 *.log
+bin/
+
+docker/.env
+!.env.example
+!docker/.env.example
 
 # Backend (Java / Maven)
 backend/target/
+*.jar
+*.class
 
 # Frontend (Node)
 frontend/node_modules/
