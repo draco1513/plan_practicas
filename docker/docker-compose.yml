@@ -1,0 +1,96 @@
+# ESFX TaskFlow - servicios de apoyo para desarrollo
+# Puertos del host distintos a los del bot de trading (que usa 5432 y 6379),
+# para que ambos proyectos puedan estar levantados al mismo tiempo.
+#
+# Uso (desde la carpeta docker/):
+#   cp .env.example .env      # y cambia las contraseñas
+#   docker compose up -d
+#   docker compose ps
+
+name: esfx-taskflow
+
+services:
+  db:
+    image: postgres:16
+    container_name: taskflow-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      TZ: America/Lima
+    ports:
+      - "${DB_PORT:-5433}:5432"          # host 5433 -> contenedor 5432
+    volumes:
+      - taskflow-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7
+    container_name: taskflow-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}"]
+    ports:
+      - "${REDIS_PORT:-6380}:6379"       # host 6380 -> contenedor 6379
+    volumes:
+      - taskflow-redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD} ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---- Aplicación completa (opcional): docker compose --profile app up -d --build ----
+  backend:
+    build: ../backend
+    container_name: taskflow-backend
+    profiles: ["app"]
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432                # puerto interno del contenedor
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRATION_SECONDS: ${JWT_EXPIRATION_SECONDS:-3600}
+      APP_ADMIN_EMAIL: ${APP_ADMIN_EMAIL}
+      APP_ADMIN_PASSWORD: ${APP_ADMIN_PASSWORD}
+      FRONTEND_URL: http://localhost:5173
+      MAIL_HOST: ${MAIL_HOST:-}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      SERVER_PORT: 8085
+      FLYWAY_DEV_LOCATION: ${FLYWAY_DEV_LOCATION:-}
+      STORAGE_PATH: /app/storage
+    volumes:
+      - taskflow-files:/app/storage
+    ports:
+      - "8085:8085"
+
+  frontend:
+    build: ../frontend
+    container_name: taskflow-frontend
+    profiles: ["app"]
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "5173:80"
+
+volumes:
+  taskflow-db-data:
+  taskflow-redis-data:
+  taskflow-files:

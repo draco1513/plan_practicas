@@ -1,0 +1,72 @@
+server:
+  port: ${SERVER_PORT:8085}
+
+spring:
+  config:
+    # Lee docker/.env automáticamente (sirve al ejecutar desde IntelliJ con la carpeta backend/ como directorio de trabajo)
+    import: optional:file:../docker/.env[.properties],optional:file:./docker/.env[.properties]
+  application:
+    name: esfx-taskflow
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5433}/${DB_NAME:taskflow}
+    username: ${DB_USER:taskflow}
+    password: ${DB_PASSWORD:cambia_esta_clave}
+  flyway:
+    enabled: true
+    # FLYWAY_DEV_LOCATION=,classpath:db/dev añade los datos de prueba (solo desarrollo)
+    locations: classpath:db/migration${FLYWAY_DEV_LOCATION:}
+  jackson:
+    default-property-inclusion: always
+    time-zone: UTC
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6380}
+      password: ${REDIS_PASSWORD:}
+  servlet:
+    multipart:
+      max-file-size: ${MAX_UPLOAD_SIZE:10MB}
+      max-request-size: ${MAX_UPLOAD_SIZE:10MB}
+  mail:
+    # Si MAIL_HOST está vacío, los correos solo se escriben en el log (modo desarrollo).
+    host: ${MAIL_HOST:}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.starttls.enable: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  health:
+    mail:
+      enabled: false
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+app:
+  jwt:
+    secret: ${JWT_SECRET:cambia_este_secreto_largo_de_al_menos_32_caracteres}
+    expiration-seconds: ${JWT_EXPIRATION_SECONDS:3600}
+  admin:
+    email: ${APP_ADMIN_EMAIL:admin@esfx.local}
+    password: ${APP_ADMIN_PASSWORD:}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+  storage:
+    path: ${STORAGE_PATH:./storage}
+  frontend-url: ${FRONTEND_URL:http://localhost:5173}
+  mail:
+    from: ${MAIL_FROM:}
+  notifications:
+    queue-key: taskflow:notifications
+    max-attempts: 5
+    worker-delay-ms: 3000
+    sweep-delay-ms: 60000
+    reminder-delay-ms: 60000

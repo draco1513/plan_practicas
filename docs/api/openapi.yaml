@@ -1,0 +1,1280 @@
+openapi: 3.0.3
+info:
+  title: ESFX TaskFlow API
+  version: 0.1.0
+  description: |
+    Contrato de la API REST del sistema de gestión de tareas de ESFX Technologies (Fase 1 / MVP).
+
+    - Arquitectura MVC en Spring Boot: los controladores que exponen estos endpoints son la "vista" y devuelven JSON.
+    - Autenticación con JWT en el encabezado `Authorization: Bearer <token>`. Todos los endpoints la exigen, salvo los de `Auth` marcados como públicos.
+    - Las contraseñas nunca se devuelven en ninguna respuesta.
+    - Fechas y horas en formato ISO 8601; la zona horaria de la interfaz es America/Lima.
+    - La extensión `x-permisos` indica el permiso necesario (ver tabla de roles en el README).
+    - Los endpoints de la Fase 2 (pizarra de ideas, Planning Poker, costos) y de integraciones con Google no están en este documento.
+servers:
+  - url: http://localhost:8085/api
+    description: Desarrollo local
+tags:
+  - name: Auth
+    description: Inicio de sesión y contraseñas
+  - name: Usuarios
+    description: Usuarios, roles y auditoría (módulo Acceso)
+  - name: Proyectos
+    description: Proyectos y sus miembros
+  - name: Tareas
+    description: Tareas, tablero Kanban, comentarios y adjuntos
+  - name: Calendario
+    description: Calendario y reuniones
+  - name: Notificaciones
+    description: Avisos dentro de la aplicación y preferencias
+  - name: Reportes
+    description: Dashboard de tareas y avance
+  - name: Horas
+    description: Registro de horas trabajadas
+security:
+  - bearerAuth: []
+
+paths:
+  # ------------------------------------------------------------ AUTH
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Iniciar sesión (RF-01)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Credenciales válidas
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Usuario autenticado y sus permisos
+      responses:
+        '200':
+          description: Datos del usuario actual
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CurrentUser' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /auth/change-password:
+    post:
+      tags: [Auth]
+      summary: Cambiar la contraseña propia (RF-03)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChangePasswordRequest' }
+      responses:
+        '204': { description: Contraseña actualizada }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Solicitar el enlace de recuperación (RF-03)
+      description: Responde siempre 202, exista o no el correo, para no revelar qué usuarios existen.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        '202': { description: "Si el correo existe, se envió el enlace" }
+  /auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: Definir una contraseña nueva con el token recibido por correo (RF-03)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, newPassword]
+              properties:
+                token: { type: string }
+                newPassword: { type: string, format: password, minLength: 8 }
+      responses:
+        '204': { description: Contraseña restablecida }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  # -------------------------------------------------------- USUARIOS
+  /users:
+    get:
+      tags: [Usuarios]
+      summary: Listar usuarios
+      x-permisos: [USER_MANAGE]
+      parameters:
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Size' }
+        - { name: q, in: query, description: Búsqueda por nombre o correo, schema: { type: string } }
+        - { name: active, in: query, schema: { type: boolean } }
+      responses:
+        '200':
+          description: Página de usuarios
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserPage' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Usuarios]
+      summary: Crear usuario y asignarle un rol (RF-02)
+      x-permisos: [USER_MANAGE]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UserCreate' }
+      responses:
+        '201':
+          description: Usuario creado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /users/{userId}:
+    parameters:
+      - { $ref: '#/components/parameters/UserId' }
+    get:
+      tags: [Usuarios]
+      summary: Obtener un usuario
+      responses:
+        '200':
+          description: Usuario
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Usuarios]
+      summary: Editar nombre y rol de un usuario (RF-02)
+      x-permisos: [USER_MANAGE]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UserUpdate' }
+      responses:
+        '200':
+          description: Usuario actualizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /users/{userId}/status:
+    patch:
+      tags: [Usuarios]
+      summary: Activar o desactivar un usuario (RF-02)
+      x-permisos: [USER_MANAGE]
+      parameters:
+        - { $ref: '#/components/parameters/UserId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [active]
+              properties:
+                active: { type: boolean }
+      responses:
+        '200':
+          description: Usuario actualizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /roles:
+    get:
+      tags: [Usuarios]
+      summary: Listar los roles disponibles
+      responses:
+        '200':
+          description: Roles
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Role' }
+  /audit-logs:
+    get:
+      tags: [Usuarios]
+      summary: Consultar la auditoría (RF-04)
+      x-permisos: [AUDIT_VIEW]
+      parameters:
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Size' }
+        - { name: entityType, in: query, schema: { type: string, example: TASK } }
+        - { name: actorUserId, in: query, schema: { type: integer, format: int64 } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: Página de registros de auditoría
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditLogPage' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # -------------------------------------------------------- PROYECTOS
+  /projects:
+    get:
+      tags: [Proyectos]
+      summary: Listar los proyectos visibles para el usuario
+      parameters:
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Size' }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/ProjectStatus' } }
+      responses:
+        '200':
+          description: Página de proyectos
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectPage' }
+    post:
+      tags: [Proyectos]
+      summary: Crear un proyecto (RF-05)
+      x-permisos: [PROJECT_CREATE]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProjectCreate' }
+      responses:
+        '201':
+          description: Proyecto creado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Project' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /projects/{projectId}:
+    parameters:
+      - { $ref: '#/components/parameters/ProjectId' }
+    get:
+      tags: [Proyectos]
+      summary: Obtener un proyecto con su avance
+      responses:
+        '200':
+          description: Proyecto
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Project' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Proyectos]
+      summary: Editar un proyecto (RF-05)
+      x-permisos: [PROJECT_EDIT]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProjectUpdate' }
+      responses:
+        '200':
+          description: Proyecto actualizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Project' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /projects/{projectId}/members:
+    parameters:
+      - { $ref: '#/components/parameters/ProjectId' }
+    get:
+      tags: [Proyectos]
+      summary: Listar los miembros del proyecto
+      responses:
+        '200':
+          description: Miembros
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/UserSummary' }
+    put:
+      tags: [Proyectos]
+      summary: Reemplazar la lista de miembros del proyecto
+      x-permisos: [PROJECT_EDIT]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userIds]
+              properties:
+                userIds:
+                  type: array
+                  items: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: Miembros actualizados
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/UserSummary' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ----------------------------------------------------------- TAREAS
+  /projects/{projectId}/tasks:
+    parameters:
+      - { $ref: '#/components/parameters/ProjectId' }
+    get:
+      tags: [Tareas]
+      summary: Listar las tareas de un proyecto (vista de tabla)
+      parameters:
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Size' }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/TaskStatus' } }
+        - { name: assigneeId, in: query, schema: { type: integer, format: int64 } }
+        - { name: overdue, in: query, description: Solo tareas vencidas, schema: { type: boolean } }
+      responses:
+        '200':
+          description: Página de tareas
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskPage' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Tareas]
+      summary: Crear una tarea (RF-06)
+      x-permisos: [TASK_CREATE]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TaskCreate' }
+      responses:
+        '201':
+          description: Tarea creada (con su código, por ejemplo TF-101)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /projects/{projectId}/board:
+    get:
+      tags: [Tareas]
+      summary: Tablero Kanban agrupado por estado (RF-09)
+      parameters:
+        - { $ref: '#/components/parameters/ProjectId' }
+      responses:
+        '200':
+          description: Columnas del tablero con sus tareas ordenadas
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Board' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /tasks/{taskId}:
+    parameters:
+      - { $ref: '#/components/parameters/TaskId' }
+    get:
+      tags: [Tareas]
+      summary: Obtener una tarea
+      responses:
+        '200':
+          description: Tarea
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Tareas]
+      summary: Editar una tarea (RF-06)
+      x-permisos: [TASK_UPDATE_ANY]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TaskUpdate' }
+      responses:
+        '200':
+          description: Tarea actualizada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /tasks/{taskId}/assignee:
+    patch:
+      tags: [Tareas]
+      summary: Asignar o reasignar una tarea (RF-07)
+      description: Genera un aviso para el usuario asignado.
+      x-permisos: [TASK_ASSIGN]
+      parameters:
+        - { $ref: '#/components/parameters/TaskId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [assigneeId]
+              properties:
+                assigneeId: { type: integer, format: int64, nullable: true }
+      responses:
+        '200':
+          description: Tarea actualizada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /tasks/{taskId}/move:
+    patch:
+      tags: [Tareas]
+      summary: Mover una tarea en el tablero Kanban (RF-09)
+      description: Cambia el estado y la posición dentro de la columna de destino.
+      x-permisos: [TASK_UPDATE_ANY, TASK_UPDATE_OWN]
+      parameters:
+        - { $ref: '#/components/parameters/TaskId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status, position]
+              properties:
+                status: { $ref: '#/components/schemas/TaskStatus' }
+                position: { type: integer, minimum: 0 }
+      responses:
+        '200':
+          description: Tarea actualizada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /tasks/{taskId}/progress:
+    patch:
+      tags: [Tareas]
+      summary: Registrar el avance de la tarea; recalcula el del proyecto (RF-08)
+      x-permisos: [TASK_UPDATE_ANY, TASK_UPDATE_OWN]
+      parameters:
+        - { $ref: '#/components/parameters/TaskId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [progress]
+              properties:
+                progress: { type: integer, minimum: 0, maximum: 100 }
+      responses:
+        '200':
+          description: Tarea actualizada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /tasks/{taskId}/comments:
+    parameters:
+      - { $ref: '#/components/parameters/TaskId' }
+    get:
+      tags: [Tareas]
+      summary: Listar los comentarios de una tarea (RF-10)
+      responses:
+        '200':
+          description: Comentarios, del más antiguo al más reciente
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Comment' }
+    post:
+      tags: [Tareas]
+      summary: Agregar un comentario (RF-10)
+      x-permisos: [COMMENT_CREATE]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string, minLength: 1 }
+      responses:
+        '201':
+          description: Comentario creado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Comment' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /tasks/{taskId}/attachments:
+    parameters:
+      - { $ref: '#/components/parameters/TaskId' }
+    get:
+      tags: [Tareas]
+      summary: Listar los adjuntos de una tarea (RF-10)
+      responses:
+        '200':
+          description: Adjuntos
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Attachment' }
+    post:
+      tags: [Tareas]
+      summary: Adjuntar un archivo (RF-10)
+      x-permisos: [COMMENT_CREATE]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '201':
+          description: Adjunto guardado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Attachment' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /attachments/{attachmentId}/download:
+    get:
+      tags: [Tareas]
+      summary: Descargar un adjunto
+      parameters:
+        - { name: attachmentId, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '200':
+          description: Contenido del archivo
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ------------------------------------------------------- CALENDARIO
+  /calendar:
+    get:
+      tags: [Calendario]
+      summary: Calendario con reuniones y fechas límite de tareas (RF-14)
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+        - name: scope
+          in: query
+          description: "`me` = solo lo mío; `team` = lo de mi equipo (según proyectos compartidos)"
+          schema: { type: string, enum: [me, team], default: me }
+      responses:
+        '200':
+          description: Eventos del rango pedido
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CalendarEvent' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /meetings:
+    post:
+      tags: [Calendario]
+      summary: Programar una reunión e invitar usuarios (RF-15)
+      description: Genera una invitación para cada invitado.
+      x-permisos: [MEETING_CREATE]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MeetingCreate' }
+      responses:
+        '201':
+          description: Reunión creada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Meeting' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /meetings/{meetingId}:
+    parameters:
+      - { $ref: '#/components/parameters/MeetingId' }
+    get:
+      tags: [Calendario]
+      summary: Obtener una reunión con sus invitados
+      responses:
+        '200':
+          description: Reunión
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Meeting' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Calendario]
+      summary: Editar una reunión (solo el organizador)
+      x-permisos: [MEETING_CREATE]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MeetingCreate' }
+      responses:
+        '200':
+          description: Reunión actualizada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Meeting' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Calendario]
+      summary: Cancelar una reunión (solo el organizador)
+      x-permisos: [MEETING_CREATE]
+      responses:
+        '204': { description: Reunión cancelada }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /meetings/{meetingId}/response:
+    put:
+      tags: [Calendario]
+      summary: Aceptar o rechazar la invitación (RF-16)
+      x-permisos: [MEETING_RESPOND]
+      parameters:
+        - { $ref: '#/components/parameters/MeetingId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [response]
+              properties:
+                response: { type: string, enum: [ACCEPTED, DECLINED] }
+      responses:
+        '200':
+          description: Reunión con la respuesta registrada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Meeting' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------------------------------------------- NOTIFICACIONES
+  /notifications:
+    get:
+      tags: [Notificaciones]
+      summary: Mis notificaciones dentro de la aplicación (RF-19)
+      parameters:
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Size' }
+        - { name: unreadOnly, in: query, schema: { type: boolean, default: false } }
+      responses:
+        '200':
+          description: Página de notificaciones
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationPage' }
+  /notifications/unread-count:
+    get:
+      tags: [Notificaciones]
+      summary: Cantidad de notificaciones sin leer (para la campana)
+      responses:
+        '200':
+          description: Conteo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count: { type: integer }
+  /notifications/{notificationId}/read:
+    post:
+      tags: [Notificaciones]
+      summary: Marcar una notificación como leída
+      parameters:
+        - { name: notificationId, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '204': { description: Marcada como leída }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /notifications/read-all:
+    post:
+      tags: [Notificaciones]
+      summary: Marcar todas como leídas
+      responses:
+        '204': { description: Todas marcadas como leídas }
+  /notifications/preferences:
+    get:
+      tags: [Notificaciones]
+      summary: Mis preferencias de recordatorios (RF-21)
+      responses:
+        '200':
+          description: Preferencias
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationPreferences' }
+    put:
+      tags: [Notificaciones]
+      summary: Configurar recordatorios antes de reuniones y vencimientos (RF-21)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotificationPreferences' }
+      responses:
+        '200':
+          description: Preferencias guardadas
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationPreferences' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  # --------------------------------------------------------- REPORTES
+  /reports/dashboard:
+    get:
+      tags: [Reportes]
+      summary: Dashboard de tareas por estado, persona y proyecto, y tareas vencidas (RF-39)
+      description: Con `REPORT_VIEW_ALL` incluye todos los proyectos; con `REPORT_VIEW_OWN`, solo los propios.
+      x-permisos: [REPORT_VIEW_ALL, REPORT_VIEW_OWN]
+      parameters:
+        - { name: projectId, in: query, description: Limita el dashboard a un proyecto, schema: { type: integer, format: int64 } }
+      responses:
+        '200':
+          description: Cifras actualizadas
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Dashboard' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ------------------------------------------------------------ HORAS
+  /time-entries:
+    get:
+      tags: [Horas]
+      summary: Listar registros de horas
+      parameters:
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Size' }
+        - { name: userId, in: query, description: "Solo con permiso de gestión; por defecto, el usuario actual", schema: { type: integer, format: int64 } }
+        - { name: projectId, in: query, schema: { type: integer, format: int64 } }
+        - { name: taskId, in: query, schema: { type: integer, format: int64 } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: Página de registros
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TimeEntryPage' }
+    post:
+      tags: [Horas]
+      summary: Registrar horas trabajadas en una tarea (RF-36)
+      x-permisos: [TIME_LOG]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TimeEntryCreate' }
+      responses:
+        '201':
+          description: Registro creado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TimeEntry' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /time-entries/{entryId}:
+    parameters:
+      - { name: entryId, in: path, required: true, schema: { type: integer, format: int64 } }
+    put:
+      tags: [Horas]
+      summary: Corregir un registro propio
+      x-permisos: [TIME_LOG]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TimeEntryCreate' }
+      responses:
+        '200':
+          description: Registro actualizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TimeEntry' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Horas]
+      summary: Eliminar un registro propio
+      x-permisos: [TIME_LOG]
+      responses:
+        '204': { description: Registro eliminado }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /projects/{projectId}/time-summary:
+    get:
+      tags: [Horas]
+      summary: Horas acumuladas del proyecto por usuario y por tarea
+      parameters:
+        - { $ref: '#/components/parameters/ProjectId' }
+      responses:
+        '200':
+          description: Resumen de horas
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TimeSummary' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    Page: { name: page, in: query, description: Número de página (desde 0), schema: { type: integer, minimum: 0, default: 0 } }
+    Size: { name: size, in: query, description: Elementos por página, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+    UserId: { name: userId, in: path, required: true, schema: { type: integer, format: int64 } }
+    ProjectId: { name: projectId, in: path, required: true, schema: { type: integer, format: int64 } }
+    TaskId: { name: taskId, in: path, required: true, schema: { type: integer, format: int64 } }
+    MeetingId: { name: meetingId, in: path, required: true, schema: { type: integer, format: int64 } }
+
+  responses:
+    BadRequest:
+      description: Datos inválidos
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Falta el token, está vencido o las credenciales son inválidas
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: El rol del usuario no tiene el permiso necesario
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: El recurso no existe o no es visible para el usuario
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: Ya existe un registro con ese valor único (correo, código de proyecto)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    # ---- comunes
+    Error:
+      type: object
+      properties:
+        timestamp: { type: string, format: date-time }
+        status: { type: integer, example: 400 }
+        code: { type: string, example: VALIDATION_ERROR }
+        message: { type: string, example: El campo email no es válido }
+        fieldErrors:
+          type: array
+          items:
+            type: object
+            properties:
+              field: { type: string }
+              message: { type: string }
+    PageInfo:
+      type: object
+      properties:
+        page: { type: integer }
+        size: { type: integer }
+        totalElements: { type: integer, format: int64 }
+        totalPages: { type: integer }
+
+    # ---- auth y usuarios
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password, writeOnly: true }
+    TokenResponse:
+      type: object
+      properties:
+        accessToken: { type: string }
+        tokenType: { type: string, example: Bearer }
+        expiresIn: { type: integer, description: Segundos de vigencia, example: 3600 }
+        mustChangePassword: { type: boolean }
+    ChangePasswordRequest:
+      type: object
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword: { type: string, format: password, writeOnly: true }
+        newPassword: { type: string, format: password, writeOnly: true, minLength: 8 }
+    Role:
+      type: object
+      properties:
+        id: { type: integer }
+        code: { type: string, enum: [ADMIN, MANAGER, PROJECT_LEAD, COLLABORATOR] }
+        name: { type: string }
+    User:
+      type: object
+      description: Nunca incluye la contraseña ni su hash.
+      properties:
+        id: { type: integer, format: int64 }
+        email: { type: string, format: email }
+        fullName: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        active: { type: boolean }
+        lastLoginAt: { type: string, format: date-time, nullable: true }
+    UserSummary:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        fullName: { type: string }
+        email: { type: string, format: email }
+    CurrentUser:
+      allOf:
+        - $ref: '#/components/schemas/User'
+        - type: object
+          properties:
+            permissions:
+              type: array
+              items: { type: string, example: TASK_CREATE }
+    UserCreate:
+      type: object
+      required: [email, fullName, roleId, temporaryPassword]
+      properties:
+        email: { type: string, format: email }
+        fullName: { type: string, maxLength: 120 }
+        roleId: { type: integer }
+        temporaryPassword: { type: string, format: password, writeOnly: true, minLength: 8, description: El usuario debe cambiarla en su primer ingreso }
+    UserUpdate:
+      type: object
+      required: [fullName, roleId]
+      properties:
+        fullName: { type: string, maxLength: 120 }
+        roleId: { type: integer }
+    UserPage:
+      allOf:
+        - $ref: '#/components/schemas/PageInfo'
+        - type: object
+          properties:
+            content:
+              type: array
+              items: { $ref: '#/components/schemas/User' }
+    AuditLog:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        actor: { $ref: '#/components/schemas/UserSummary' }
+        action: { type: string, example: UPDATE }
+        entityType: { type: string, example: TASK }
+        entityId: { type: integer, format: int64 }
+        detail: { type: object, additionalProperties: true }
+        createdAt: { type: string, format: date-time }
+    AuditLogPage:
+      allOf:
+        - $ref: '#/components/schemas/PageInfo'
+        - type: object
+          properties:
+            content:
+              type: array
+              items: { $ref: '#/components/schemas/AuditLog' }
+
+    # ---- proyectos y tareas
+    ProjectStatus:
+      type: string
+      enum: [PLANNED, ACTIVE, ON_HOLD, COMPLETED, CANCELLED]
+    TaskStatus:
+      type: string
+      enum: [TODO, IN_PROGRESS, DONE]
+    TaskPriority:
+      type: string
+      enum: [LOW, MEDIUM, HIGH]
+    Project:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        code: { type: string, example: TF }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        owner: { $ref: '#/components/schemas/UserSummary' }
+        status: { $ref: '#/components/schemas/ProjectStatus' }
+        startDate: { type: string, format: date, nullable: true }
+        endDate: { type: string, format: date, nullable: true }
+        progress: { type: integer, minimum: 0, maximum: 100, description: Promedio del avance de sus tareas }
+        taskCount: { type: integer }
+    ProjectCreate:
+      type: object
+      required: [code, name, ownerId]
+      properties:
+        code: { type: string, pattern: '^[A-Z]{2,10}$', example: TF }
+        name: { type: string, maxLength: 120 }
+        description: { type: string }
+        ownerId: { type: integer, format: int64 }
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date }
+    ProjectUpdate:
+      type: object
+      required: [name, ownerId, status]
+      properties:
+        name: { type: string, maxLength: 120 }
+        description: { type: string }
+        ownerId: { type: integer, format: int64 }
+        status: { $ref: '#/components/schemas/ProjectStatus' }
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date }
+    ProjectPage:
+      allOf:
+        - $ref: '#/components/schemas/PageInfo'
+        - type: object
+          properties:
+            content:
+              type: array
+              items: { $ref: '#/components/schemas/Project' }
+    Task:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        key: { type: string, example: TF-101, description: Código del proyecto y número de tarea }
+        projectId: { type: integer, format: int64 }
+        title: { type: string }
+        description: { type: string, nullable: true }
+        status: { $ref: '#/components/schemas/TaskStatus' }
+        priority: { $ref: '#/components/schemas/TaskPriority' }
+        assignee: { allOf: [{ $ref: '#/components/schemas/UserSummary' }], nullable: true }
+        reporter: { $ref: '#/components/schemas/UserSummary' }
+        dueDate: { type: string, format: date, nullable: true }
+        overdue: { type: boolean }
+        progress: { type: integer, minimum: 0, maximum: 100 }
+        position: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    TaskCreate:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string, maxLength: 200 }
+        description: { type: string }
+        priority: { $ref: '#/components/schemas/TaskPriority' }
+        assigneeId: { type: integer, format: int64, nullable: true }
+        dueDate: { type: string, format: date }
+    TaskUpdate:
+      type: object
+      required: [title, priority]
+      properties:
+        title: { type: string, maxLength: 200 }
+        description: { type: string }
+        priority: { $ref: '#/components/schemas/TaskPriority' }
+        dueDate: { type: string, format: date, nullable: true }
+    TaskPage:
+      allOf:
+        - $ref: '#/components/schemas/PageInfo'
+        - type: object
+          properties:
+            content:
+              type: array
+              items: { $ref: '#/components/schemas/Task' }
+    Board:
+      type: object
+      properties:
+        projectId: { type: integer, format: int64 }
+        columns:
+          type: array
+          items:
+            type: object
+            properties:
+              status: { $ref: '#/components/schemas/TaskStatus' }
+              tasks:
+                type: array
+                items: { $ref: '#/components/schemas/Task' }
+    Comment:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        author: { $ref: '#/components/schemas/UserSummary' }
+        body: { type: string }
+        createdAt: { type: string, format: date-time }
+    Attachment:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        fileName: { type: string }
+        contentType: { type: string }
+        sizeBytes: { type: integer, format: int64 }
+        uploadedBy: { $ref: '#/components/schemas/UserSummary' }
+        createdAt: { type: string, format: date-time }
+
+    # ---- calendario
+    CalendarEvent:
+      type: object
+      properties:
+        type: { type: string, enum: [MEETING, TASK_DUE] }
+        refId: { type: integer, format: int64, description: Id de la reunión o de la tarea }
+        title: { type: string }
+        startAt: { type: string, format: date-time }
+        endAt: { type: string, format: date-time, nullable: true }
+        allDay: { type: boolean, description: true para las fechas límite de tareas }
+    Meeting:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        title: { type: string }
+        description: { type: string, nullable: true }
+        startAt: { type: string, format: date-time }
+        endAt: { type: string, format: date-time }
+        location: { type: string, nullable: true, description: Lugar o enlace de videollamada }
+        organizer: { $ref: '#/components/schemas/UserSummary' }
+        projectId: { type: integer, format: int64, nullable: true }
+        invitees:
+          type: array
+          items:
+            type: object
+            properties:
+              user: { $ref: '#/components/schemas/UserSummary' }
+              response: { type: string, enum: [PENDING, ACCEPTED, DECLINED] }
+    MeetingCreate:
+      type: object
+      required: [title, startAt, endAt, inviteeIds]
+      properties:
+        title: { type: string, maxLength: 200 }
+        description: { type: string }
+        startAt: { type: string, format: date-time }
+        endAt: { type: string, format: date-time }
+        location: { type: string, maxLength: 255 }
+        projectId: { type: integer, format: int64, nullable: true }
+        inviteeIds:
+          type: array
+          items: { type: integer, format: int64 }
+
+    # ---- notificaciones
+    Notification:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        type: { type: string, example: TASK_ASSIGNED }
+        title: { type: string }
+        body: { type: string }
+        payload: { type: object, additionalProperties: true, description: Ids para enlazar a la tarea o reunión }
+        read: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    NotificationPage:
+      allOf:
+        - $ref: '#/components/schemas/PageInfo'
+        - type: object
+          properties:
+            content:
+              type: array
+              items: { $ref: '#/components/schemas/Notification' }
+    NotificationPreferences:
+      type: object
+      required: [emailEnabled, meetingReminderMin, taskDueReminderHrs]
+      properties:
+        emailEnabled: { type: boolean }
+        meetingReminderMin: { type: integer, minimum: 0, example: 30 }
+        taskDueReminderHrs: { type: integer, minimum: 0, example: 24 }
+
+    # ---- reportes
+    Dashboard:
+      type: object
+      properties:
+        generatedAt: { type: string, format: date-time }
+        tasksByStatus:
+          type: array
+          items:
+            type: object
+            properties:
+              status: { $ref: '#/components/schemas/TaskStatus' }
+              count: { type: integer }
+        tasksByAssignee:
+          type: array
+          items:
+            type: object
+            properties:
+              user: { $ref: '#/components/schemas/UserSummary' }
+              todo: { type: integer }
+              inProgress: { type: integer }
+              done: { type: integer }
+        tasksByProject:
+          type: array
+          items:
+            type: object
+            properties:
+              projectId: { type: integer, format: int64 }
+              projectName: { type: string }
+              total: { type: integer }
+              done: { type: integer }
+              progress: { type: integer }
+        overdueTasks:
+          type: array
+          items: { $ref: '#/components/schemas/Task' }
+
+    # ---- horas
+    TimeEntry:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        taskId: { type: integer, format: int64 }
+        taskKey: { type: string, example: TF-101 }
+        projectId: { type: integer, format: int64 }
+        user: { $ref: '#/components/schemas/UserSummary' }
+        workDate: { type: string, format: date }
+        hours: { type: number, format: double, example: 2.5 }
+        note: { type: string, nullable: true }
+    TimeEntryCreate:
+      type: object
+      required: [taskId, workDate, hours]
+      properties:
+        taskId: { type: integer, format: int64 }
+        workDate: { type: string, format: date }
+        hours: { type: number, format: double, exclusiveMinimum: false, minimum: 0.25, maximum: 24 }
+        note: { type: string, maxLength: 300 }
+    TimeEntryPage:
+      allOf:
+        - $ref: '#/components/schemas/PageInfo'
+        - type: object
+          properties:
+            content:
+              type: array
+              items: { $ref: '#/components/schemas/TimeEntry' }
+    TimeSummary:
+      type: object
+      properties:
+        projectId: { type: integer, format: int64 }
+        totalHours: { type: number, format: double }
+        byUser:
+          type: array
+          items:
+            type: object
+            properties:
+              user: { $ref: '#/components/schemas/UserSummary' }
+              hours: { type: number, format: double }
+        byTask:
+          type: array
+          items:
+            type: object
+            properties:
+              taskKey: { type: string }
+              title: { type: string }
+              hours: { type: number, format: double }

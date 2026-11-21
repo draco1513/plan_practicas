@@ -1,0 +1,160 @@
+erDiagram
+    %% Línea continua = FK real dentro del esquema. Línea punteada = referencia lógica entre esquemas (sin FK)
+
+    ROLES ||--o{ USERS : "tiene"
+    ROLES ||--o{ ROLE_PERMISSIONS : ""
+    PERMISSIONS ||--o{ ROLE_PERMISSIONS : ""
+    USERS ||--o{ PASSWORD_RESET_TOKENS : "solicita"
+    USERS ||--o{ AUDIT_LOG : "actúa"
+
+    PROJECTS ||--o{ PROJECT_MEMBERS : "tiene"
+    PROJECTS ||--o{ TASKS : "contiene"
+    TASKS ||--o{ TASK_COMMENTS : "tiene"
+    TASKS ||--o{ TASK_ATTACHMENTS : "tiene"
+
+    MEETINGS ||--o{ MEETING_INVITEES : "invita"
+
+    NOTIFICATION_TEMPLATES ||..o{ NOTIFICATIONS : "genera (por code)"
+
+    USERS ||..o{ PROJECTS : "owner_id"
+    USERS ||..o{ PROJECT_MEMBERS : "user_id"
+    USERS ||..o{ TASKS : "assignee_id / reporter_id"
+    USERS ||..o{ TASK_COMMENTS : "author_id"
+    USERS ||..o{ MEETINGS : "organizer_id"
+    USERS ||..o{ MEETING_INVITEES : "user_id"
+    USERS ||..o{ NOTIFICATIONS : "user_id"
+    USERS ||..|| NOTIFICATION_PREFERENCES : "user_id"
+    USERS ||..o{ TIME_ENTRIES : "user_id"
+    TASKS ||..o{ TIME_ENTRIES : "task_id"
+    PROJECTS ||..o{ MEETINGS : "project_id (opcional)"
+
+    ROLES {
+        smallint id PK
+        varchar code UK
+        varchar name
+    }
+    PERMISSIONS {
+        smallint id PK
+        varchar code UK
+        varchar description
+    }
+    ROLE_PERMISSIONS {
+        smallint role_id PK
+        smallint permission_id PK
+    }
+    USERS {
+        bigint id PK
+        varchar email UK
+        varchar password_hash "BCrypt"
+        varchar full_name
+        smallint role_id FK
+        boolean active
+        boolean must_change_password
+        timestamptz last_login_at
+    }
+    PASSWORD_RESET_TOKENS {
+        bigint id PK
+        bigint user_id FK
+        char token_hash UK
+        timestamptz expires_at
+        timestamptz used_at
+    }
+    AUDIT_LOG {
+        bigint id PK
+        bigint actor_user_id FK
+        varchar action
+        varchar entity_type
+        bigint entity_id
+        jsonb detail
+        timestamptz created_at
+    }
+
+    PROJECTS {
+        bigint id PK
+        varchar code UK "ej. TF"
+        varchar name
+        bigint owner_id
+        varchar status
+        date start_date
+        date end_date
+        int task_seq
+    }
+    PROJECT_MEMBERS {
+        bigint project_id PK
+        bigint user_id PK
+    }
+    TASKS {
+        bigint id PK
+        bigint project_id FK
+        int task_number "TF-101"
+        varchar title
+        varchar status "TODO, IN_PROGRESS, DONE"
+        varchar priority
+        bigint assignee_id
+        bigint reporter_id
+        date due_date
+        smallint progress
+        int position "orden Kanban"
+    }
+    TASK_COMMENTS {
+        bigint id PK
+        bigint task_id FK
+        bigint author_id
+        text body
+    }
+    TASK_ATTACHMENTS {
+        bigint id PK
+        bigint task_id FK
+        bigint uploaded_by
+        varchar file_name
+        varchar storage_path
+    }
+
+    MEETINGS {
+        bigint id PK
+        varchar title
+        timestamptz start_at
+        timestamptz end_at
+        varchar location
+        bigint organizer_id
+        bigint project_id
+    }
+    MEETING_INVITEES {
+        bigint meeting_id PK
+        bigint user_id PK
+        varchar response "PENDING, ACCEPTED, DECLINED"
+    }
+
+    NOTIFICATION_TEMPLATES {
+        bigint id PK
+        varchar code
+        varchar channel
+        varchar subject_template
+        text body_template
+    }
+    NOTIFICATIONS {
+        bigint id PK
+        bigint user_id
+        varchar type
+        varchar channel "IN_APP, EMAIL"
+        varchar status "PENDING, SENT, FAILED"
+        varchar idempotency_key UK
+        smallint attempts
+        timestamptz scheduled_at
+        timestamptz read_at
+    }
+    NOTIFICATION_PREFERENCES {
+        bigint user_id PK
+        boolean email_enabled
+        int meeting_reminder_min
+        int task_due_reminder_hrs
+    }
+
+    TIME_ENTRIES {
+        bigint id PK
+        bigint task_id
+        bigint project_id
+        bigint user_id
+        date work_date
+        numeric hours
+    }

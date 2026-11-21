@@ -1,0 +1,45 @@
+flowchart LR
+    U["Usuarios internos<br/>(navegador, PC y celular)"]
+
+    subgraph FE["Frontend · React + TypeScript + Bootstrap (Vite)"]
+        direction TB
+        FE1["Pantallas por módulo<br/>login · proyectos · Kanban · calendario<br/>dashboard · notificaciones · horas"]
+        FE2["Cliente de API tipado<br/>(generado desde openapi.yaml)"]
+        FE1 --> FE2
+    end
+
+    subgraph BE["Backend · Java + Spring Boot · MVC · monolito modular (API REST = la vista)"]
+        direction TB
+        SEC["Seguridad transversal<br/>JWT · roles y permisos · manejo de errores"]
+        subgraph M["Módulos (un paquete por módulo: controller → service → repository → model)"]
+            direction LR
+            A["access<br/>usuarios · roles · auditoría"]
+            P["projects<br/>proyectos · tareas · Kanban"]
+            C["calendar<br/>reuniones · invitados"]
+            N["notifications<br/>plantillas · cola · envío"]
+            R["reports<br/>dashboard"]
+            T["timetracking<br/>horas"]
+        end
+        SEC --- M
+    end
+
+    subgraph DATA["Datos y servicios"]
+        direction TB
+        PG[("PostgreSQL :5433<br/>un esquema por módulo")]
+        RD[("Redis :6380<br/>cola de avisos")]
+    end
+
+    G["Google<br/>Gmail (correos) · Calendar y Contactos (fase 3)"]
+
+    U --> FE
+    FE -- "HTTPS · REST + JWT" --> BE
+    BE --> PG
+    N --> RD
+    N -- "EmailProvider" --> G
+
+    P -. "evento: tarea asignada / por vencer" .-> N
+    C -. "evento: invitación / recordatorio" .-> N
+    P -. "evento: cambios" .-> A
+    R -- "consulta vía servicios" --> P
+    R -- "consulta vía servicios" --> T
+    R -- "consulta vía servicios" --> C
